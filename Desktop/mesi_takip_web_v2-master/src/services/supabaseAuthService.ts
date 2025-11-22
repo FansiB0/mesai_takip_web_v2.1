@@ -41,7 +41,8 @@ export const registerUser = async (userData: {
         data: {
           name: userData.name,
           role: userData.role || 'user'
-        }
+        },
+        emailRedirectTo: undefined // Email onayı gerektirmesin
       }
     })
 
@@ -61,21 +62,46 @@ export const registerUser = async (userData: {
       console.log('🔄 Attempting to sign in user immediately...');
     }
 
-    // Kayıt sonrası otomatik giriş yap
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: userData.email,
-      password: userData.password
-    });
+    // Kayıt sonrası otomatik giriş yap (email onayı beklemeden)
+    try {
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: userData.email,
+        password: userData.password
+      });
 
-    if (signInError) {
-      if (import.meta.env.DEV) {
-        console.error('❌ Auto sign-in error:', signInError);
+      if (signInError) {
+        if (import.meta.env.DEV) {
+          console.error('❌ Auto sign-in error:', signInError);
+          console.log('🔄 Trying alternative sign-in method...');
+        }
+        
+        // Alternatif: Session'ı manuel olarak oluştur
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: authData.session?.access_token || '',
+          refresh_token: authData.session?.refresh_token || ''
+        });
+        
+        if (sessionError) {
+          if (import.meta.env.DEV) {
+            console.error('❌ Session set error:', sessionError);
+          }
+          // Son çare: Hata fırlat ama kullanıcıyı oluşturulmuş olarak kabul et
+          console.log('⚠️ User created but auto sign-in failed - manual login required');
+        } else {
+          if (import.meta.env.DEV) {
+            console.log('✅ Session set successfully');
+          }
+        }
+      } else {
+        if (import.meta.env.DEV) {
+          console.log('✅ Auto sign-in successful:', signInData.user?.id);
+        }
       }
-      throw signInError;
-    }
-
-    if (import.meta.env.DEV) {
-      console.log('✅ Auto sign-in successful:', signInData.user?.id);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('❌ Sign-in attempt failed:', error);
+      }
+      // Kullanıcı oluşturuldu, devam et
     }
 
     // 2. Users tablosuna kullanıcı bilgilerini ekle (eğer yoksa)
