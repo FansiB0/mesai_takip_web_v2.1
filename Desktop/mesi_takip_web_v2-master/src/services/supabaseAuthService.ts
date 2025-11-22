@@ -1,5 +1,4 @@
 import { supabase } from '../config/supabase'
-import type { User } from '../types'
 
 export interface SupabaseUser {
   id: string
@@ -59,6 +58,24 @@ export const registerUser = async (userData: {
 
     if (import.meta.env.DEV) {
       console.log('✅ Auth user created:', authData.user.id);
+      console.log('🔄 Attempting to sign in user immediately...');
+    }
+
+    // Kayıt sonrası otomatik giriş yap
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: userData.email,
+      password: userData.password
+    });
+
+    if (signInError) {
+      if (import.meta.env.DEV) {
+        console.error('❌ Auto sign-in error:', signInError);
+      }
+      throw signInError;
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('✅ Auto sign-in successful:', signInData.user?.id);
     }
 
     // 2. Users tablosuna kullanıcı bilgilerini ekle (eğer yoksa)
@@ -236,34 +253,51 @@ export const logoutUser = async (): Promise<void> => {
 // Mevcut kullanıcıyı al
 export const getCurrentUser = async (): Promise<SupabaseUser | null> => {
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    if (import.meta.env.DEV) {
+      console.log('🔄 Getting current user...');
+    }
     
-    if (!user) return null
+    const { data: { user }, error } = await supabase.auth.getUser()
+    
+    if (error) {
+      if (import.meta.env.DEV) {
+        console.error('❌ Get current user error:', error);
+      }
+      return null
+    }
+    
+    if (!user) {
+      if (import.meta.env.DEV) {
+        console.log('❌ No authenticated user found');
+      }
+      return null
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('✅ Auth user found:', user.id);
+    }
 
     // Users tablosundan kullanıcı bilgilerini al
-    const { data: userData, error } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
       .eq('id', user.id)
       .single()
 
-    if (error) {
-      // Eğer users tablosunda kullanıcı yoksa, auth kullanıcısından bilgileri al
-      if (error.code === 'PGRST116') {
-        if (import.meta.env.DEV) {
-          console.log('⚠️ User not found in users table, creating from auth data...');
-        }
-        const fallbackUser: SupabaseUser = {
-          id: user.id,
-          email: user.email || '',
-          name: (user.user_metadata?.name as string) || 'Unknown User',
-          role: (user.user_metadata?.role as 'admin' | 'user') || 'user',
-          created_at: user.created_at || new Date().toISOString(),
-          updated_at: user.updated_at || new Date().toISOString()
-        };
-        return fallbackUser;
+    if (userError) {
+      if (import.meta.env.DEV) {
+        console.error('❌ User data error:', userError);
       }
-      throw error;
+      // Users tablosunda yoksa auth verilerinden oluştur
+      const fallbackUser: SupabaseUser = {
+        id: user.id,
+        email: user.email || '',
+        name: (user.user_metadata?.name as string) || 'Unknown User',
+        role: (user.user_metadata?.role as 'admin' | 'user') || 'user',
+        created_at: user.created_at || new Date().toISOString(),
+        updated_at: user.updated_at || new Date().toISOString()
+      };
+      return fallbackUser;
     }
 
     return userData
